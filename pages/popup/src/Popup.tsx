@@ -1,33 +1,53 @@
 import '@src/Popup.css';
 import { useStorageSuspense, withErrorBoundary, withSuspense } from '@chrome-extension-boilerplate/shared';
 import { exampleThemeStorage } from '@chrome-extension-boilerplate/storage';
-
-import { ComponentPropsWithoutRef } from 'react';
+import { useState, useEffect } from 'react';
 
 const Popup = () => {
   const theme = useStorageSuspense(exampleThemeStorage);
+  const [highlightedText, setHighlightedText] = useState('');
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const getHighlightedText = async () => {
+      try {
+        if (!chrome.tabs || !chrome.scripting) {
+          throw new Error('Chrome APIs not available');
+        }
+
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab.id) throw new Error('No active tab');
+
+        const results = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => window.getSelection()?.toString() ?? '',
+        });
+
+        if (results && results[0] && 'result' in results[0]) {
+          setHighlightedText(results[0].result as string);
+        } else {
+          setHighlightedText('');
+        }
+      } catch (err) {
+        console.error('Error:', err);
+        setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      }
+    };
+
+    getHighlightedText();
+  }, []);
 
   return (
-    <div
-      className="App"
-      style={{
-        backgroundColor: theme === 'light' ? '#eee' : '#222',
-      }}>
+    <div className="App" style={{ backgroundColor: theme === 'light' ? '#eee' : '#222' }}>
       <header className="App-header" style={{ color: theme === 'light' ? '#222' : '#eee' }}>
         <img src={chrome.runtime.getURL('popup/logo.svg')} className="App-logo" alt="logo" />
-
-        <p>
-          Edit <code>pages/popup/src/Popup.tsx</code> and save to reload.
-        </p>
-        <a
-          className="App-link"
-          href="https://reactjs.org"
-          target="_blank"
-          rel="noopener noreferrer"
-          style={{ color: theme === 'light' ? '#0281dc' : undefined, marginBottom: '10px' }}>
-          Learn React!
-        </a>
-        <ToggleButton>Toggle theme</ToggleButton>
+        <div className="flex flex-col items-center justify-center h-screen pt-10">
+          <h1 className="text-2xl font-bold">Highlighted Text</h1>
+          <div className="mt-4 p-4 bg-gray-100 rounded">
+            {error ? `Error: ${error}` : highlightedText || 'No text highlighted'}
+          </div>
+          <ToggleButton className="mt-4">Toggle Theme</ToggleButton>
+        </div>
       </header>
     </div>
   );
