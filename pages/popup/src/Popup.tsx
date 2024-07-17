@@ -5,20 +5,22 @@ import { useState, useEffect } from 'react';
 
 const Popup = () => {
   const theme = useStorageSuspense(exampleThemeStorage);
-  const [content, setContent] = useState({ text: '', url: '', screenshots: [] as string[] });
+  const [content, setContent] = useState({ text: '', url: '', screenshots: [] as string[], fullPageScreenshot: '' });
   const [error, setError] = useState<string | null>(null);
 
-  const captureScreenshot = async (tabId: number) => {
+  const captureScreenshot = async (tabId: number): Promise<string> => {
     try {
-      const screenshot = await chrome.tabs.captureVisibleTab();
-      setContent(prev => ({ ...prev, screenshots: [...prev.screenshots, screenshot] }));
+      return await chrome.tabs.captureVisibleTab();
     } catch (err) {
+      console.error('Error capturing screenshot:', err);
       setError(err instanceof Error ? err.message : 'Failed to capture screenshot');
+      return '';
     }
   };
 
   useEffect(() => {
     const captureContent = async () => {
+      console.log('Starting content capture');
       try {
         const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
         if (!tab.id) throw new Error('No active tab');
@@ -35,35 +37,73 @@ const Popup = () => {
           text: result.result?.text || '',
           url: result.result?.url || '',
           screenshots: [],
+          fullPageScreenshot: '',
         });
 
         let reachedBottom = false;
+        let screenshots: string[] = [];
         while (!reachedBottom) {
-          await captureScreenshot(tab.id);
-
-          // Scroll and check if bottom is reached
+          await new Promise(resolve => setTimeout(resolve, 400));
+          const screenshot = await captureScreenshot(tab.id);
+          screenshots.push(screenshot);
+          setContent(prev => ({ ...prev, screenshots }));
           reachedBottom = await chrome.scripting
             .executeScript({
               target: { tabId: tab.id },
-              func: () => {
+              func: async () => {
                 const scrollHeight = document.documentElement.scrollHeight;
                 const scrollTop = window.pageYOffset;
                 const clientHeight = window.innerHeight;
-
+                await new Promise(resolve => setTimeout(resolve, 500));
                 if (scrollTop + clientHeight >= scrollHeight) {
                   return true;
                 }
-
                 window.scrollBy(0, clientHeight);
                 return false;
               },
             })
             .then(result => result[0].result ?? false);
-
-          // Wait for any dynamic content to load
-          await new Promise(resolve => setTimeout(resolve, 500));
         }
+
+        console.log(`Captured ${screenshots.length} screenshots`);
+
+        const stitchScreenshots = (screenshots: string[]): Promise<string> => {
+          return new Promise(resolve => {
+            const loadImages = screenshots.map(
+              screenshot =>
+                new Promise<HTMLImageElement>(resolve => {
+                  const img = new Image();
+                  img.onload = () => resolve(img);
+                  img.onerror = () => resolve(img);
+                  img.src = screenshot;
+                }),
+            );
+
+            Promise.all(loadImages)
+              .then(images => {
+                const canvas = document.createElement('canvas');
+                const ctx = canvas.getContext('2d')!;
+                canvas.width = images[0].width;
+                canvas.height = images.reduce((height, img) => height + img.height, 0);
+
+                let yOffset = 0;
+                images.forEach(img => {
+                  ctx.drawImage(img, 0, yOffset);
+                  yOffset += img.height;
+                });
+
+                resolve(canvas.toDataURL());
+              })
+              .catch(() => resolve(''));
+          });
+        };
+
+        console.log('Stitching screenshots');
+        const fullPageScreenshot = await stitchScreenshots(screenshots);
+        console.log('Screenshot stitching complete');
+        setContent(prev => ({ ...prev, screenshots, fullPageScreenshot }));
       } catch (err) {
+        console.error('Error in captureContent:', err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred');
       }
     };
@@ -95,6 +135,18 @@ const Popup = () => {
               ))}
             </div>
           </div>
+          {content.fullPageScreenshot && (
+            <div className="mt-5">
+              <h2 className="text-sm font-bold text-indigo-400 mb-2 uppercase">Full Page Screenshot</h2>
+              <div className="max-h-96 overflow-y-auto">
+                <img
+                  src={content.fullPageScreenshot}
+                  alt="Full Page Screenshot"
+                  className="rounded-lg shadow-md w-full"
+                />
+              </div>
+            </div>
+          )}
         </>
       )}
     </div>
