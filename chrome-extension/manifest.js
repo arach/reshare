@@ -31,6 +31,7 @@ const manifest = {
   action: {
     default_popup: 'popup/index.html',
     default_icon: 'icon-34.png',
+    width: 800,
   },
   chrome_url_overrides: {
     newtab: 'new-tab/index.html',
