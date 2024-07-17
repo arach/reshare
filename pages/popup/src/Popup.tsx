@@ -1,45 +1,75 @@
 import '@src/Popup.css';
 import { useStorageSuspense, withErrorBoundary, withSuspense } from '@chrome-extension-boilerplate/shared';
 import { exampleThemeStorage } from '@chrome-extension-boilerplate/storage';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 
 const Popup = () => {
   const theme = useStorageSuspense(exampleThemeStorage);
-  const [content, setContent] = useState({ text: '', url: '', screenshot: '' });
+  const [content, setContent] = useState({ text: '', url: '', screenshots: [] as string[] });
   const [error, setError] = useState<string | null>(null);
 
-  const captureContent = useCallback(async () => {
+  const captureScreenshot = async (tabId: number) => {
     try {
-      if (!chrome.tabs || !chrome.scripting) throw new Error('Chrome APIs not available');
-      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-      if (!tab.id) throw new Error('No active tab');
-
-      const [textResult] = await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: () => window.getSelection()?.toString() || '',
-      });
-
       const screenshot = await chrome.tabs.captureVisibleTab();
-
-      setContent({
-        text: textResult.result as string,
-        url: tab.url || '',
-        screenshot,
-      });
+      setContent(prev => ({ ...prev, screenshots: [...prev.screenshots, screenshot] }));
     } catch (err) {
-      console.error('Error:', err);
-      setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      setError(err instanceof Error ? err.message : 'Failed to capture screenshot');
     }
-  }, []);
+  };
 
   useEffect(() => {
-    captureContent();
-  }, [captureContent]);
+    const captureContent = async () => {
+      try {
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab.id) throw new Error('No active tab');
 
-  const reShare = async () => {
-    // ReShare logic here
-    console.log('Sharing content:', content);
-  };
+        const [result] = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => ({
+            text: window.getSelection()?.toString() || '',
+            url: window.location.href,
+          }),
+        });
+
+        setContent({
+          text: result.result?.text || '',
+          url: result.result?.url || '',
+          screenshots: [],
+        });
+
+        let reachedBottom = false;
+        while (!reachedBottom) {
+          await captureScreenshot(tab.id);
+
+          // Scroll and check if bottom is reached
+          reachedBottom = await chrome.scripting
+            .executeScript({
+              target: { tabId: tab.id },
+              func: () => {
+                const scrollHeight = document.documentElement.scrollHeight;
+                const scrollTop = window.pageYOffset;
+                const clientHeight = window.innerHeight;
+
+                if (scrollTop + clientHeight >= scrollHeight) {
+                  return true;
+                }
+
+                window.scrollBy(0, clientHeight);
+                return false;
+              },
+            })
+            .then(result => result[0].result ?? false);
+
+          // Wait for any dynamic content to load
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'An unknown error occurred');
+      }
+    };
+
+    captureContent();
+  }, []);
 
   const bgColor = theme === 'light' ? 'bg-slate-100' : 'bg-slate-800';
   const textColor = theme === 'light' ? 'text-slate-800' : 'text-slate-200';
@@ -53,17 +83,18 @@ const Popup = () => {
         <>
           <ContentSection title="Selected Text" content={content.text} />
           <ContentSection title="URL" content={content.url} />
-          {content.screenshot && (
-            <div className="mt-5">
-              <h2 className="text-sm font-bold text-indigo-400 mb-2 uppercase">Screenshot</h2>
-              <img src={content.screenshot} alt="Screenshot" className="rounded-lg shadow-md w-full" />
+          <div className="mt-5">
+            <h2 className="text-sm font-bold text-indigo-400 mb-2 uppercase">
+              Screenshots ({content.screenshots.length})
+            </h2>
+            <div className="max-h-96 overflow-y-auto">
+              {content.screenshots.map((screenshot, index) => (
+                <div key={index} className="mb-4">
+                  <img src={screenshot} alt={`Screenshot ${index + 1}`} className="rounded-lg shadow-md w-full" />
+                </div>
+              ))}
             </div>
-          )}
-          <button
-            className="mt-6 w-full py-3 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition-colors duration-200 text-base font-medium uppercase"
-            onClick={reShare}>
-            ReShare
-          </button>
+          </div>
         </>
       )}
     </div>
