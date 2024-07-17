@@ -1,4 +1,4 @@
-export const captureContent = async () => {
+export const captureContent = async function* () {
   console.log('Starting content capture');
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (!tab.id) throw new Error('No active tab');
@@ -11,14 +11,27 @@ export const captureContent = async () => {
     }),
   });
 
-  const screenshots = await captureScreenshots(tab.id);
+  yield {
+    text: result.result?.text || '',
+    url: result.result?.url || '',
+    screenshots: [],
+    fullPageScreenshot: '',
+  };
+
+  const screenshots: string[] = [];
+  for await (const screenshot of captureScreenshots(tab.id)) {
+    if (screenshot) {
+      screenshots.push(screenshot);
+      yield { screenshots: [...screenshots] };
+    }
+  }
   console.log(`Captured ${screenshots.length} screenshots`);
 
   console.log('Stitching screenshots');
   const fullPageScreenshot = await stitchScreenshots(screenshots);
   console.log('Screenshot stitching complete');
 
-  return {
+  yield {
     text: result.result?.text || '',
     url: result.result?.url || '',
     screenshots,
@@ -26,21 +39,20 @@ export const captureContent = async () => {
   };
 };
 
-const captureScreenshots = async (tabId: number): Promise<string[]> => {
-  const screenshots: string[] = [];
+async function* captureScreenshots(tabId: number): AsyncGenerator<string> {
   let reachedBottom = false;
 
   while (!reachedBottom) {
     await new Promise(resolve => setTimeout(resolve, 400));
     const screenshot = await captureScreenshot(tabId);
-    screenshots.push(screenshot);
+    if (screenshot) yield screenshot;
 
     reachedBottom = await chrome.scripting
       .executeScript({
         target: { tabId },
         func: async () => {
           const scrollHeight = document.documentElement.scrollHeight;
-          const scrollTop = window.pageYOffset;
+          const scrollTop = window.scrollY || window.pageYOffset;
           const clientHeight = window.innerHeight;
           await new Promise(resolve => setTimeout(resolve, 500));
           if (scrollTop + clientHeight >= scrollHeight) {
@@ -52,13 +64,11 @@ const captureScreenshots = async (tabId: number): Promise<string[]> => {
       })
       .then(result => result[0].result ?? false);
   }
-
-  return screenshots;
-};
+}
 
 const captureScreenshot = async (tabId: number): Promise<string> => {
   try {
-    return await chrome.tabs.captureVisibleTab();
+    return await chrome.tabs.captureVisibleTab(null, { format: 'png' });
   } catch (err) {
     console.error('Error capturing screenshot:', err);
     return '';
@@ -79,6 +89,10 @@ const stitchScreenshots = (screenshots: string[]): Promise<string> => {
 
     Promise.all(loadImages)
       .then(images => {
+        if (images.length === 0) {
+          resolve('');
+          return;
+        }
         const canvas = document.createElement('canvas');
         const ctx = canvas.getContext('2d')!;
         canvas.width = images[0].width;
@@ -90,7 +104,7 @@ const stitchScreenshots = (screenshots: string[]): Promise<string> => {
           yOffset += img.height;
         });
 
-        resolve(canvas.toDataURL());
+        resolve(canvas.toDataURL('image/png'));
       })
       .catch(() => resolve(''));
   });

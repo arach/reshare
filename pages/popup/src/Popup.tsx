@@ -13,8 +13,9 @@ const Popup = () => {
   useEffect(() => {
     const performCapture = async () => {
       try {
-        const capturedContent = await captureContent();
-        setContent(capturedContent);
+        for await (const update of captureContent()) {
+          setContent(prevContent => ({ ...prevContent, ...update }));
+        }
       } catch (err) {
         console.error('Error in captureContent:', err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred');
