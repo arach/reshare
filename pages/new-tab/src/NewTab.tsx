@@ -11,9 +11,7 @@ const NewTab = () => {
     <div className="App" style={{ backgroundColor: theme === 'light' ? '#eee' : '#222' }}>
       <header className="App-header" style={{ color: theme === 'light' ? '#222' : '#eee' }}>
         <img src={chrome.runtime.getURL('new-tab/logo.svg')} className="App-logo" alt="logo" />
-        <p>
-          Edit <code>pages/new-tab/src/NewTab.tsx</code> and save to reload.
-        </p>
+        <p>ReSave Home</p>
         <a
           className="App-link"
           href="https://reactjs.org"

@@ -20,7 +20,9 @@
     "prettier": "prettier . --write --ignore-path ../../.prettierignore",
     "type-check": "tsc --noEmit"
   },
-  "dependencies": {},
+  "dependencies": {
+    "axios": "^1.7.2"
+  },
   "devDependencies": {
     "@chrome-extension-boilerplate/storage": "workspace:*",
     "@chrome-extension-boilerplate/tsconfig": "workspace:*"
